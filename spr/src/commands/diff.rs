@@ -6,6 +6,7 @@
  */
 
 use std::iter::zip;
+use std::process::Stdio;
 
 use crate::{
     error::{add_error, Error, Result, ResultExt},
@@ -434,28 +435,69 @@ async fn diff_impl(
         if !needs_merging_master && pr_head_tree == new_head_tree && pr_base_tree == new_base_tree {
             // ...and it does not need a rebase, and the trees of both Pull
             // Request branch and base are all the right ones.
-            output("✅", "No update necessary")?;
+
+            let mut pull_request_updates: PullRequestUpdate = Default::default();
 
             if opts.update_message {
-                // However, the user requested to update the commit message on
-                // GitHub
-
-                let mut pull_request_updates: PullRequestUpdate = Default::default();
                 pull_request_updates.update_message(pull_request, message);
+            }
 
-                if !pull_request_updates.is_empty() {
-                    if opts.dry_run {
-                        output(
-                            "  ",
-                            &format!("Would update PR #{} title/body", pull_request.number),
-                        )?;
-                    } else {
-                        // ...and there are actual changes to the message
-                        gh.update_pull_request(pull_request.number, pull_request_updates)
-                            .await?;
-                        output("✍", "Updated commit message on GitHub")?;
+            // PR was stacked but is now directly on master — ask to re-point base
+            let repoint_base = if !pull_request.base.is_master_branch() && directly_based_on_master
+            {
+                let confirmed = tokio::task::spawn_blocking({
+                    let old_base = pull_request.base.branch_name().to_string();
+                    let master = config.master_ref.branch_name().to_string();
+                    move || {
+                        dialoguer::Confirm::new()
+                            .with_prompt(format!(
+                                "PR base is '{}' but commit is now on '{}'. Re-point?",
+                                old_base, master
+                            ))
+                            .default(true)
+                            .interact()
                     }
+                })
+                .await??;
+
+                if confirmed {
+                    pull_request_updates.base = Some(config.master_ref.branch_name().to_string());
                 }
+                confirmed
+            } else {
+                false
+            };
+
+            if !pull_request_updates.is_empty() {
+                gh.update_pull_request(pull_request.number, pull_request_updates)
+                    .await?;
+
+                if opts.update_message {
+                    output("✍", "Updated commit message on GitHub")?;
+                }
+                if repoint_base {
+                    output(
+                        "🔄",
+                        &format!("Re-pointed PR base to {}", config.master_ref.branch_name()),
+                    )?;
+                }
+            } else {
+                output("✅", "No update necessary")?;
+            }
+
+            // Clean up the old base branch if we re-pointed to master
+            if repoint_base {
+                let _ = tokio::process::Command::new("git")
+                    .arg("push")
+                    .arg("--no-verify")
+                    .arg("--delete")
+                    .arg("--")
+                    .arg(&config.remote_name)
+                    .arg(pull_request.base.on_github())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .and_then(|mut child| child.try_wait());
             }
 
             return Ok(());
@@ -514,10 +556,12 @@ async fn diff_impl(
     // commit is not directly based on master, we have to create this new PR
     // with a base branch, so that is case 3.
 
+    let old_base_branch = base_branch.clone();
+
     let (pr_base_parent, base_branch) = if pr_base_tree == new_base_tree && !needs_merging_master {
         // Case 1
         (None, base_branch)
-    } else if base_branch.is_none() && (directly_based_on_master || opts.cherry_pick) {
+    } else if directly_based_on_master || opts.cherry_pick {
         // Case 2
         (Some(master_base_oid), None)
     } else {
@@ -688,7 +732,7 @@ async fn diff_impl(
                 pull_request_updates.update_message(&pull_request, message);
             }
 
-            if let Some(base_branch) = base_branch {
+            if let Some(ref base_branch) = base_branch {
                 // We are using a base branch.
 
                 if let Some(base_branch_commit) = pr_base_parent {
@@ -718,11 +762,36 @@ async fn diff_impl(
                 run_command(&mut cmd)
                     .await
                     .reword("git push failed".to_string())?;
+
+                // PR was stacked but is now directly on master — re-point base
+                if old_base_branch.is_some() {
+                    pull_request_updates.base = Some(config.master_ref.branch_name().to_string());
+                }
             }
+
+            output_commit_hash(pr_commit, opts.no_clipboard)?;
 
             if !pull_request_updates.is_empty() {
                 gh.update_pull_request(pull_request.number, pull_request_updates)
                     .await?;
+            }
+
+            // Delete the old base branch from remote if we dropped it.
+            // Best-effort: GitHub may have already deleted it.
+            if let Some(ref old_base) = old_base_branch
+                && base_branch.is_none()
+            {
+                let _ = tokio::process::Command::new("git")
+                    .arg("push")
+                    .arg("--no-verify")
+                    .arg("--delete")
+                    .arg("--")
+                    .arg(&config.remote_name)
+                    .arg(old_base.on_github())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .and_then(|mut child| child.try_wait());
             }
         } else {
             // We are creating a new Pull Request.
@@ -740,7 +809,6 @@ async fn diff_impl(
             run_command(&mut cmd)
                 .await
                 .reword("git push failed".to_string())?;
-
             output_commit_hash(pr_commit, opts.no_clipboard)?;
 
             // Then call GitHub to create the Pull Request.
