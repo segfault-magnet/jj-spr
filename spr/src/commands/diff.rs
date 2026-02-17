@@ -8,16 +8,28 @@
 use std::iter::zip;
 
 use crate::{
-    error::{Error, Result, ResultExt, add_error},
+    error::{add_error, Error, Result, ResultExt},
     github::{
         GitHub, PullRequest, PullRequestRequestReviewers, PullRequestState, PullRequestUpdate,
     },
-    message::{MessageSection, validate_commit_message},
+    message::{validate_commit_message, MessageSection},
     output::{output, write_commit_title},
-    utils::{parse_name_list, remove_all_parens, run_command},
+    utils::{copy_to_clipboard, parse_name_list, remove_all_parens, run_command},
 };
 use git2::Oid;
 use indoc::{formatdoc, indoc};
+
+fn output_commit_hash(pr_commit: Oid, no_clipboard: bool) -> Result<()> {
+    let hash = pr_commit.to_string();
+    output("🔗", &format!("Pushed commit: {}", hash))?;
+    if !no_clipboard {
+        match copy_to_clipboard(&hash) {
+            Ok(()) => output("📋", "Copied to clipboard")?,
+            Err(e) => output("⚠️", &format!("Clipboard failed: {}", e))?,
+        }
+    }
+    Ok(())
+}
 
 #[derive(Debug, clap::Parser)]
 pub struct DiffOptions {
@@ -38,6 +50,10 @@ pub struct DiffOptions {
     /// 'rebase' or 'review comments')
     #[clap(long, short = 'm')]
     message: Option<String>,
+
+    /// Do not copy the pushed git commit hash to the clipboard
+    #[clap(long)]
+    no_clipboard: bool,
 
     /// Submit this commit as if it was cherry-picked on master. Do not base it
     /// on any intermediate changes between the master branch and this commit.
@@ -719,10 +735,13 @@ async fn diff_impl(
                     base_branch.on_github()
                 ));
             }
-            // Push the pull request branch and the base branch if present
+            // Push the new commit onto the Pull Request branch (and also the
+            // new base commit, if we added that to cmd above).
             run_command(&mut cmd)
                 .await
                 .reword("git push failed".to_string())?;
+
+            output_commit_hash(pr_commit, opts.no_clipboard)?;
 
             // Then call GitHub to create the Pull Request.
             let pull_request_number = gh
@@ -860,6 +879,7 @@ mod tests {
             draft: false,
             message: None,
             cherry_pick: false,
+            no_clipboard: false,
             base: None,
             revision: None,
             dry_run: false,
@@ -881,6 +901,7 @@ mod tests {
             draft: false,
             message: None,
             cherry_pick: false,
+            no_clipboard: false,
             base: Some("main".to_string()),
             revision: None,
             dry_run: false,
@@ -907,6 +928,7 @@ mod tests {
             draft: false,
             message: None,
             cherry_pick: false,
+            no_clipboard: false,
             base: Some("main".to_string()),
             revision: None,
             dry_run: false,
@@ -921,6 +943,7 @@ mod tests {
             draft: false,
             message: None,
             cherry_pick: false,
+            no_clipboard: false,
             base: Some("trunk()".to_string()),
             revision: None,
             dry_run: false,
@@ -937,6 +960,7 @@ mod tests {
             draft: false,
             message: None,
             cherry_pick: false,
+            no_clipboard: false,
             base: Some("trunk()".to_string()),
             revision: None,
             dry_run: false,
@@ -956,6 +980,7 @@ mod tests {
             draft: true,
             message: Some("Update message".to_string()),
             cherry_pick: false,
+            no_clipboard: false,
             base: Some("trunk()".to_string()),
             revision: None,
             dry_run: false,

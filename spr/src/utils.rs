@@ -42,6 +42,40 @@ pub fn remove_all_parens(text: &str) -> String {
     lazy_regex::regex!(r#"[()]"#).replace_all(text, "").into()
 }
 
+pub fn copy_to_clipboard(text: &str) -> Result<()> {
+    let mut child = if cfg!(target_os = "macos") {
+        std::process::Command::new("pbcopy")
+            .stdin(Stdio::piped())
+            .spawn()?
+    } else if cfg!(target_os = "linux") {
+        std::process::Command::new("xclip")
+            .args(["-selection", "clipboard"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .or_else(|_| {
+                std::process::Command::new("xsel")
+                    .args(["--clipboard", "--input"])
+                    .stdin(Stdio::piped())
+                    .spawn()
+            })?
+    } else {
+        return Err(Error::new("clipboard not supported on this platform"));
+    };
+
+    child
+        .stdin
+        .as_mut()
+        .ok_or_else(|| Error::new("failed to open clipboard stdin"))?
+        .write_all(text.as_bytes())?;
+
+    let status = child.wait()?;
+    if !status.success() {
+        return Err(Error::new("clipboard command failed"));
+    }
+
+    Ok(())
+}
+
 pub async fn run_command(cmd: &mut tokio::process::Command) -> Result<()> {
     let cmd_output = cmd
         .stdout(Stdio::null())
