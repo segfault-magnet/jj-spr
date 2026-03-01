@@ -75,6 +75,8 @@ enum Commands {
 
     /// Remove orphan SPR branches from the remote
     Cleanup(commands::cleanup::CleanupOptions),
+    /// Squash a commit into another and push as a derived commit
+    Squash(commands::squash::SquashOptions),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -189,6 +191,7 @@ pub async fn spr() -> Result<()> {
         Commands::Patch(opts) => commands::patch::patch(opts, &jj, &mut gh, &config).await?,
         Commands::Close(opts) => commands::close::close(opts, &jj, &mut gh, &config).await?,
         Commands::Cleanup(opts) => commands::cleanup::cleanup(opts, &jj, &gh, &config).await?,
+        Commands::Squash(opts) => commands::squash::squash(opts, &jj, &mut gh, &config).await?,
         // The following commands are executed above and return from this
         // function before it reaches this match.
         Commands::Init | Commands::Format(_) => (),

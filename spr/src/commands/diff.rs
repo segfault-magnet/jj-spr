@@ -36,39 +36,39 @@ fn output_commit_hash(pr_commit: Oid, no_clipboard: bool) -> Result<()> {
 pub struct DiffOptions {
     /// Create/update pull requests for commits in range from base to revision
     #[clap(long, short = 'a')]
-    all: bool,
+    pub all: bool,
 
     /// Update the pull request title and description on GitHub from the local
     /// commit message
     #[clap(long)]
-    update_message: bool,
+    pub update_message: bool,
 
     /// Submit any new Pull Request as a draft
     #[clap(long)]
-    draft: bool,
+    pub draft: bool,
 
     /// Message to be used for commits updating existing pull requests (e.g.
     /// 'rebase' or 'review comments')
     #[clap(long, short = 'm')]
-    message: Option<String>,
+    pub message: Option<String>,
 
     /// Do not copy the pushed git commit hash to the clipboard
     #[clap(long)]
-    no_clipboard: bool,
+    pub no_clipboard: bool,
 
     /// Submit this commit as if it was cherry-picked on master. Do not base it
     /// on any intermediate changes between the master branch and this commit.
     #[clap(long)]
-    cherry_pick: bool,
+    pub cherry_pick: bool,
 
     /// Base revision for --all mode (if not specified, uses trunk)
     #[clap(long)]
-    base: Option<String>,
+    pub base: Option<String>,
 
     /// Jujutsu revision(s) to operate on. Can be a single revision like '@' or a range like 'main..@' or 'a::c'.
     /// If a range is provided, behaves like --all mode. If not specified, uses '@-'.
     #[clap(short = 'r', long)]
-    revision: Option<String>,
+    pub revision: Option<String>,
 
     /// Preview what would happen without pushing or creating PRs
     #[clap(long)]

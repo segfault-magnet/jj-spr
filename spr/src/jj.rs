@@ -303,7 +303,7 @@ impl Jujutsu {
         })
     }
 
-    fn resolve_revision_to_commit_id(&self, revision: &str) -> Result<Oid> {
+    pub fn resolve_revision_to_commit_id(&self, revision: &str) -> Result<Oid> {
         let output = self.run_captured_with_args([
             "log",
             "--no-graph",
@@ -320,6 +320,54 @@ impl Jujutsu {
                 commit_id_str, e
             ))
         })
+    }
+
+    pub fn get_revision_description(&self, revision: &str) -> Result<String> {
+        let output = self.run_captured_with_args([
+            "log",
+            "--no-graph",
+            "-r",
+            revision,
+            "--template",
+            "description",
+        ])?;
+
+        Ok(output.trim().to_string())
+    }
+
+    pub fn get_parent_change_id(&self, revision: &str) -> Result<String> {
+        let output = self.run_captured_with_args([
+            "log",
+            "--no-graph",
+            "-r",
+            &format!("parents({})", revision),
+            "--template",
+            "change_id",
+        ])?;
+
+        Ok(output.trim().to_string())
+    }
+
+    pub fn squash_revision(&self, source: &str, into: Option<&str>) -> Result<()> {
+        let mut cmd = Command::new(&self.jj_bin);
+        cmd.args(["squash", "-r", source, "--use-destination-message"])
+            .current_dir(&self.repo_path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        if let Some(target) = into {
+            cmd.args(["--into", target]);
+        }
+
+        let output = cmd.output()?;
+        if !output.status.success() {
+            return Err(Error::new(format!(
+                "Failed to squash: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
+        }
+
+        Ok(())
     }
 
     #[cfg(test)]
