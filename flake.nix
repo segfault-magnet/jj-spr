@@ -35,6 +35,11 @@
         "aarch64-darwin"
         "x86_64-darwin"
       ];
+
+      flake.overlays.default = final: prev: {
+        jj-spr = self.packages.${prev.stdenv.hostPlatform.system}.jj-spr;
+      };
+
       perSystem =
         {
           config,
@@ -43,6 +48,7 @@
           ...
         }:
         let
+          cargoToml = builtins.fromTOML (builtins.readFile ./spr/Cargo.toml);
           rustToolchain = pkgs.fenix.stable;
         in
         {
@@ -55,11 +61,8 @@
           formatter = config.treefmt.build.wrapper;
           checks.formatting = config.treefmt.build.check self;
 
-          packages.default =
-            let
-              cargoToml = builtins.fromTOML (builtins.readFile ./spr/Cargo.toml);
-            in
-            pkgs.rustPlatform.buildRustPackage {
+          packages = rec {
+            jj-spr = pkgs.rustPlatform.buildRustPackage {
               pname = cargoToml.package.name;
               version = cargoToml.package.version;
 
@@ -69,10 +72,16 @@
                 lockFile = ./Cargo.lock;
               };
 
-              buildInputs = with pkgs; [
-                openssl
-                zlib
-              ];
+              buildInputs =
+                with pkgs;
+                [
+                  openssl
+                  zlib
+                ]
+                ++ lib.optionals stdenv.isDarwin [
+                  darwin.apple_sdk.frameworks.Security
+                  darwin.apple_sdk.frameworks.SystemConfiguration
+                ];
 
               nativeBuildInputs = with pkgs; [
                 pkg-config
@@ -84,9 +93,22 @@
                 description = "Jujutsu subcommand for submitting pull requests for individual, amendable, rebaseable commits to GitHub";
                 homepage = "https://github.com/LucioFranco/spr";
                 license = licenses.mit;
+                mainProgram = "jj-spr";
                 maintainers = [ ];
               };
             };
+
+            default = jj-spr;
+          };
+
+          apps = rec {
+            jj-spr = {
+              type = "app";
+              program = "${config.packages.jj-spr}/bin/jj-spr";
+            };
+
+            default = jj-spr;
+          };
 
           pre-commit = {
             check.enable = true;
